@@ -2,56 +2,73 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import os
+import requests
+import json
+from io import StringIO
 
 st.set_page_config(page_title="AGARAM Builders", page_icon="🏗️", layout="wide")
 
+# YOUR SHEET & SCRIPT - CORRECT ID
 SHEET_ID = "1IpB41qL59I3YaW_XE-_G58I63ux0sxLZEx-AMSGbFf4"
-SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
+SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxH3miuDoFGBfzEjE8DTrC3BYbX6kumWWohA5WPbxayITkdX-K8WSlm_NvT-f5qf-jq/exec"
 
 for f in ["agaram_logo.jpg","logo.png","AGARAM LOGO.jpg"]:
     if os.path.exists(f):
         st.image(f, width='stretch')
         break
 
-try:
-    conn = st.connection("gsheets", type="GSheetsConnection")
-    USE_SHEET = True
-except:
-    USE_SHEET = False
-
-def load_data(ws):
-    if USE_SHEET:
+def load_from_sheet(sheet_name):
+    try:
+        # Public CSV export - no auth needed
+        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200 and len(r.text) > 10:
+            df = pd.read_csv(StringIO(r.text))
+            return df.dropna(how='all')
+    except:
+        pass
+    # Fallback local
+    if os.path.exists(f"{sheet_name}.csv"):
         try:
-            df = conn.read(spreadsheet=SHEET_URL, worksheet=ws, ttl=0)
-            df = df.dropna(how='all')
-            if not df.empty:
-                return df
-        except:
-            pass
-    if os.path.exists(f"{ws}.csv"):
-        try:
-            return pd.read_csv(f"{ws}.csv")
+            return pd.read_csv(f"{sheet_name}.csv")
         except:
             return pd.DataFrame()
     return pd.DataFrame()
 
-def save_data(df, ws):
-    if USE_SHEET:
-        try:
-            conn.update(spreadsheet=SHEET_URL, worksheet=ws, data=df)
-        except Exception as e:
-            st.error(f"Sheet Error: {e}")
-    df.to_csv(f"{ws}.csv", index=False)
+def save_to_sheet(sheet_name, row_dict):
+    try:
+        # Save to Google Sheet via Apps Script
+        payload = {
+            'sheet': sheet_name,
+            'data': json.dumps(row_dict)
+        }
+        r = requests.post(SCRIPT_URL, data=payload, timeout=10)
+        # Also save local backup
+        if os.path.exists(f"{sheet_name}.csv"):
+            df = pd.read_csv(f"{sheet_name}.csv")
+            df = pd.concat([df, pd.DataFrame([row_dict])], ignore_index=True)
+            df.to_csv(f"{sheet_name}.csv", index=False)
+        else:
+            pd.DataFrame([row_dict]).to_csv(f"{sheet_name}.csv", index=False)
+        return True
+    except Exception as e:
+        st.error(f"Save failed: {e}")
+        return False
 
 menu = st.sidebar.selectbox("Menu", ["Home","Add Staff","Add Working Side Name","Daily Attendance","Salary Report","View Staff List"])
 
 if menu == "Home":
     st.header("🏗️ AGARAM Dashboard")
+    staff_df = load_from_sheet("staff")
+    sites_df = load_from_sheet("sites")
+    att_df = load_from_sheet("attendance")
     c1,c2,c3 = st.columns(3)
-    c1.metric("Total Staff", len(load_data("staff")))
-    c2.metric("Sites", len(load_data("sites")))
-    c3.metric("Attendance", len(load_data("attendance")))
-    st.success("✅ Google Sheet Connected - Data Permanent!")
+    c1.metric("Total Staff", len(staff_df))
+    c2.metric("Sites", len(sites_df))
+    c3.metric("Attendance", len(att_df))
+    if len(staff_df) > 0:
+        st.success(f"✅ {len(staff_df)} Staff in Google Sheet - Permanent!")
+    st.dataframe(staff_df, width='stretch')
 
 elif menu == "Add Staff":
     st.header("Add New Staff")
@@ -66,12 +83,12 @@ elif menu == "Add Staff":
             if not name:
                 st.error("Name required!")
             else:
-                df = load_data("staff")
-                df = pd.concat([df, pd.DataFrame([{"Staff ID":sid,"Name":name,"Phone":phone,"Job Role":role,"Daily Salary":salary,"Working Side Name":site}])], ignore_index=True)
-                save_data(df, "staff")
-                st.success(f"✅ {name} Saved to Google Sheet!")
-                st.balloons()
-    st.dataframe(load_data("staff"), width='stretch')
+                row = {"Staff ID":sid,"Name":name,"Phone":phone,"Job Role":role,"Daily Salary":salary,"Working Side Name":site}
+                if save_to_sheet("staff", row):
+                    st.success(f"✅ {name} Saved to Google Sheet! Permanent!")
+                    st.balloons()
+    st.subheader("Staff List (From Google Sheet)")
+    st.dataframe(load_from_sheet("staff"), width='stretch')
 
 elif menu == "Add Working Side Name":
     st.header("Add Working Side Name")
@@ -83,16 +100,15 @@ elif menu == "Add Working Side Name":
             if not sname:
                 st.error("Site Name required!")
             else:
-                df = load_data("sites")
-                df = pd.concat([df, pd.DataFrame([{"Site Name":sname,"Location":loc,"Supervisor":sup}])], ignore_index=True)
-                save_data(df, "sites")
-                st.success(f"✅ {sname} Saved!")
-    st.dataframe(load_data("sites"), width='stretch')
+                row = {"Site Name":sname,"Location":loc,"Supervisor":sup}
+                if save_to_sheet("sites", row):
+                    st.success(f"✅ {sname} Saved to Sheet!")
+    st.dataframe(load_from_sheet("sites"), width='stretch')
 
 elif menu == "Daily Attendance":
     st.header("Daily Attendance + Advance")
-    staff_df = load_data("staff")
-    site_df = load_data("sites")
+    staff_df = load_from_sheet("staff")
+    site_df = load_from_sheet("sites")
     if len(staff_df)==0:
         st.warning("First Add Staff!")
     else:
@@ -108,16 +124,14 @@ elif menu == "Daily Attendance":
                 if col4.button("Save", key=f"bt_{idx}"):
                     daily = float(row['Daily Salary']) if pd.notna(row['Daily Salary']) else 0
                     sal = daily - adv if status=="Present" else (daily/2 - adv if status=="Half Day" else -adv)
-                    adf = load_data("attendance")
-                    new_entry = {"Date":str(sel_date),"Staff ID":row['Staff ID'],"Name":row['Name'],"Site Name":sel_site,"Status":status,"Advance":adv,"Salary":sal}
-                    adf = pd.concat([adf, pd.DataFrame([new_entry])], ignore_index=True)
-                    save_data(adf, "attendance")
-                    st.toast(f"✅ {row['Name']} Saved!")
-        st.dataframe(load_data("attendance"), width='stretch')
+                    new_row = {"Date":str(sel_date),"Staff ID":row['Staff ID'],"Name":row['Name'],"Site Name":sel_site,"Status":status,"Advance":adv,"Salary":sal}
+                    if save_to_sheet("attendance", new_row):
+                        st.toast(f"✅ {row['Name']} Saved to Sheet!")
+        st.dataframe(load_from_sheet("attendance"), width='stretch')
 
 elif menu == "Salary Report":
     st.header("Salary Report")
-    adf = load_data("attendance")
+    adf = load_from_sheet("attendance")
     st.dataframe(adf, width='stretch')
     if not adf.empty and "Salary" in adf.columns:
         st.metric("Total to Pay", f"₹ {pd.to_numeric(adf['Salary'], errors='coerce').sum()}")
@@ -125,5 +139,5 @@ elif menu == "Salary Report":
         st.download_button("📥 Download Excel", adf.to_csv(index=False), "salary_report.csv")
 
 elif menu == "View Staff List":
-    st.header("All Staff")
-    st.dataframe(load_data("staff"), width='stretch')
+    st.header("All Staff - From Google Sheet")
+    st.dataframe(load_from_sheet("staff"), width='stretch')
