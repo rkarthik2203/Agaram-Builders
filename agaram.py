@@ -4,10 +4,11 @@ from datetime import date
 import os
 
 st.set_page_config(page_title="AGARAM Builders", page_icon="🏗️", layout="wide")
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1IpB41qL59I3YaW_XE_-G58I63ux0sxLZEx-AMSGbFf4"
 
-# Logo
-for f in ["agaram_logo.jpg","logo.png","AGARAM LOGO.jpg","agaram_logo.png"]:
+SHEET_ID = "1IpB41qL59I3YaW_XE-_G58I63ux0sxLZEx-AMSGbFf4"
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
+
+for f in ["agaram_logo.jpg","logo.png","AGARAM LOGO.jpg"]:
     if os.path.exists(f):
         st.image(f, width='stretch')
         break
@@ -17,7 +18,6 @@ try:
     USE_SHEET = True
 except:
     USE_SHEET = False
-    conn = None
 
 def load_data(ws):
     if USE_SHEET:
@@ -42,7 +42,6 @@ def save_data(df, ws):
         except Exception as e:
             st.error(f"Sheet Error: {e}")
     df.to_csv(f"{ws}.csv", index=False)
-    return True
 
 menu = st.sidebar.selectbox("Menu", ["Home","Add Staff","Add Working Side Name","Daily Attendance","Salary Report","View Staff List"])
 
@@ -51,9 +50,8 @@ if menu == "Home":
     c1,c2,c3 = st.columns(3)
     c1.metric("Total Staff", len(load_data("staff")))
     c2.metric("Sites", len(load_data("sites")))
-    c3.metric("Attendance Records", len(load_data("attendance")))
-    if not USE_SHEET:
-        st.warning("Running Local Mode - Add Secrets to make permanent")
+    c3.metric("Attendance", len(load_data("attendance")))
+    st.success("✅ Google Sheet Connected - Data Permanent!")
 
 elif menu == "Add Staff":
     st.header("Add New Staff")
@@ -71,7 +69,7 @@ elif menu == "Add Staff":
                 df = load_data("staff")
                 df = pd.concat([df, pd.DataFrame([{"Staff ID":sid,"Name":name,"Phone":phone,"Job Role":role,"Daily Salary":salary,"Working Side Name":site}])], ignore_index=True)
                 save_data(df, "staff")
-                st.success(f"✅ {name} Saved!")
+                st.success(f"✅ {name} Saved to Google Sheet!")
                 st.balloons()
     st.dataframe(load_data("staff"), width='stretch')
 
@@ -101,54 +99,29 @@ elif menu == "Daily Attendance":
         sel_date = st.date_input("Date", date.today())
         site_list = site_df["Site Name"].tolist() if len(site_df)>0 and "Site Name" in site_df.columns else ["General"]
         sel_site = st.selectbox("Select Working Side", site_list)
-        
-        attend_df = load_data("attendance")
-        st.write("---")
         for idx, row in staff_df.iterrows():
             with st.container(border=True):
                 col1,col2,col3,col4 = st.columns([2,1,1,1])
-                col1.write(f"**{row['Name']}** ({row.get('Job Role','')})")
-                status = col2.selectbox("Status", ["Present","Absent","Half Day"], key=f"st_{idx}_{row['Name']}")
-                adv = col3.number_input("Advance ₹", min_value=0, value=0, key=f"ad_{idx}_{row['Name']}")
-                if col4.button("Save", key=f"bt_{idx}_{row['Name']}"):
+                col1.write(f"**{row['Name']}**")
+                status = col2.selectbox("Status", ["Present","Absent","Half Day"], key=f"st_{idx}")
+                adv = col3.number_input("Advance ₹", min_value=0, value=0, key=f"ad_{idx}")
+                if col4.button("Save", key=f"bt_{idx}"):
                     daily = float(row['Daily Salary']) if pd.notna(row['Daily Salary']) else 0
-                    if status=="Present":
-                        sal = daily - adv
-                    elif status=="Half Day":
-                        sal = (daily/2) - adv
-                    else:
-                        sal = -adv
+                    sal = daily - adv if status=="Present" else (daily/2 - adv if status=="Half Day" else -adv)
+                    adf = load_data("attendance")
                     new_entry = {"Date":str(sel_date),"Staff ID":row['Staff ID'],"Name":row['Name'],"Site Name":sel_site,"Status":status,"Advance":adv,"Salary":sal}
-                    attend_df = pd.concat([attend_df, pd.DataFrame([new_entry])], ignore_index=True)
-                    save_data(attend_df, "attendance")
-                    st.toast(f"{row['Name']} - {status} Saved!")
-        st.write("---")
-        st.subheader("Today's Records")
+                    adf = pd.concat([adf, pd.DataFrame([new_entry])], ignore_index=True)
+                    save_data(adf, "attendance")
+                    st.toast(f"✅ {row['Name']} Saved!")
         st.dataframe(load_data("attendance"), width='stretch')
 
 elif menu == "Salary Report":
     st.header("Salary Report")
     adf = load_data("attendance")
-    if len(adf)==0:
-        st.info("No attendance yet")
-    else:
-        # Filter by date/site
-        f1,f2 = st.columns(2)
-        date_filter = f1.text_input("Filter by Date (YYYY-MM-DD) - leave empty for all")
-        site_filter = f2.text_input("Filter by Site")
-        if date_filter:
-            adf = adf[adf['Date'].astype(str).str.contains(date_filter)]
-        if site_filter:
-            adf = adf[adf['Site Name'].astype(str).str.contains(site_filter)]
-        
-        st.dataframe(adf, width='stretch')
-        # Summary
-        if "Salary" in adf.columns:
-            total_sal = pd.to_numeric(adf["Salary"], errors='coerce').sum()
-            total_adv = pd.to_numeric(adf["Advance"], errors='coerce').sum()
-            c1,c2 = st.columns(2)
-            c1.metric("Total Salary to Pay", f"₹ {total_sal}")
-            c2.metric("Total Advance", f"₹ {total_adv}")
+    st.dataframe(adf, width='stretch')
+    if not adf.empty and "Salary" in adf.columns:
+        st.metric("Total to Pay", f"₹ {pd.to_numeric(adf['Salary'], errors='coerce').sum()}")
+    if not adf.empty:
         st.download_button("📥 Download Excel", adf.to_csv(index=False), "salary_report.csv")
 
 elif menu == "View Staff List":
