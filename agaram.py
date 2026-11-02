@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 from datetime import date
@@ -9,7 +8,6 @@ st.set_page_config(page_title="AGARAM Builders", page_icon="🏗️", layout="wi
 SHEET_ID = "1IpB41qL59I3YaW_XE_-G58I63ux0sxLZEx-AMSGbFf4"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
 
-# Logo
 logo_file = None
 for f in ["agaram_logo.jpg", "logo.png", "AGARAM LOGO.jpg"]:
     if os.path.exists(f):
@@ -21,14 +19,12 @@ if logo_file:
 else:
     st.title("🏗️ AGARAM Builders & Consultant")
 
-st.markdown("---")
-
+# Silent connection - No yellow/green box
 try:
     conn = st.connection("gsheets", type="GSheetsConnection")
     USE_SHEET = True
 except:
     USE_SHEET = False
-    st.warning("Google Sheet connect pending - Add Secrets in Streamlit")
 
 def load_data(worksheet):
     try:
@@ -49,17 +45,14 @@ def save_data(df, worksheet):
             conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
             return True
         return False
-    except Exception as e:
-        st.error(f"Save Error: {e}")
+    except:
         return False
 
 menu = st.sidebar.selectbox("Menu", ["Home","Add Staff","Add Working Side Name","Daily Attendance","Salary Report","View Staff List"])
 if logo_file:
     st.sidebar.image(logo_file, width='stretch')
-    st.sidebar.success("✅ Permanent Storage")
 
 if menu == "Home":
-    st.success("✅ Google Sheet Permanent Save! Data அழியாது!")
     staff_df = load_data("staff")
     site_df = load_data("sites")
     attend_df = load_data("attendance")
@@ -67,6 +60,9 @@ if menu == "Home":
     c1.metric("Total Staff", len(staff_df))
     c2.metric("Working Sites", len(site_df))
     c3.metric("Today Entries", len(attend_df))
+    if len(staff_df)>0:
+        st.subheader("Recent Staff")
+        st.dataframe(staff_df.tail(5), width='stretch')
 
 elif menu == "Add Staff":
     st.header("Add New Staff")
@@ -77,7 +73,7 @@ elif menu == "Add Staff":
         role = st.selectbox("Job Role", ["Mason","Helper","Carpenter","Bar Bender","Supervisor","Driver","Other"])
         salary = st.number_input("Daily Salary", min_value=0, value=800)
         site = st.text_input("Working Side Name")
-        submit = st.form_submit_button("💾 Permanent Save")
+        submit = st.form_submit_button("💾 Save")
         if submit:
             if not name:
                 st.error("Name required!")
@@ -86,8 +82,7 @@ elif menu == "Add Staff":
                 new_row = {"Staff ID":sid,"Name":name,"Phone":phone,"Job Role":role,"Daily Salary":salary,"Working Side Name":site}
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 if save_data(df, "staff"):
-                    st.success(f"✅ {name} Permanent Save!")
-                    st.balloons()
+                    st.success(f"✅ {name} Saved!")
     st.dataframe(load_data("staff"), width='stretch')
 
 elif menu == "Add Working Side Name":
@@ -96,16 +91,16 @@ elif menu == "Add Working Side Name":
         sname = st.text_input("Working Side Name *")
         loc = st.text_input("Location")
         sup = st.text_input("Supervisor")
-        submit = st.form_submit_button("💾 Save Permanent")
+        submit = st.form_submit_button("💾 Save")
         if submit:
             df = load_data("sites")
             df = pd.concat([df, pd.DataFrame([{"Site Name":sname,"Location":loc,"Supervisor":sup}])], ignore_index=True)
             if save_data(df, "sites"):
-                st.success(f"✅ {sname} Permanent Save!")
+                st.success(f"✅ {sname} Saved!")
     st.dataframe(load_data("sites"), width='stretch')
 
 elif menu == "Daily Attendance":
-    st.header("Daily Attendance - Permanent")
+    st.header("Daily Attendance")
     staff_df = load_data("staff")
     site_df = load_data("sites")
     if len(staff_df)==0:
@@ -130,8 +125,7 @@ elif menu == "Daily Attendance":
                 salary_calc = daily_sal - adv if status=="Present" else (daily_sal/2 - adv if status=="Half Day" else -adv)
                 new_entry = {"Date":str(sel_date),"Staff ID":row['Staff ID'],"Name":row['Name'],"Site Name":sel_site,"Status":status,"Advance":adv,"Salary":salary_calc}
                 attend_df = pd.concat([attend_df, pd.DataFrame([new_entry])], ignore_index=True)
-                if save_data(attend_df, "attendance"):
-                    st.toast(f"✅ {row['Name']} Saved!")
+                save_data(attend_df, "attendance")
         st.dataframe(load_data("attendance"), width='stretch')
 
 elif menu == "Salary Report":
